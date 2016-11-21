@@ -1,5 +1,5 @@
 //=============================================================================
-// Copyright © 2008 Point Grey Research, Inc. All Rights Reserved.
+// Copyright ï¿½ 2008 Point Grey Research, Inc. All Rights Reserved.
 //
 // This software is the confidential and proprietary information of Point
 // Grey Research, Inc. ("Confidential Information").  You shall not
@@ -24,6 +24,11 @@
 #include <sstream>
 #include <iomanip>
 #include <string>
+#include <stdio.h>
+#include <cstdlib>
+#include <fstream>
+#include <dirent.h>
+
 
 #include "FlyCapture2.h"
 #include <opencv2/core/core.hpp>
@@ -73,44 +78,47 @@ void PrintError( Error error )
 	error.PrintErrorTrace();
 }
 
-int readImages(const char *path, std::vector<cv::Mat> &imgs);
+int readImages(const char *path, std::vector<cv::Mat> &imgs)
 {
 	imgs.clear();
 
 	DIR* dirFile = opendir( path );
-   	if ( dirFile ) 
+   	if ( dirFile )
    	{
       	struct dirent* hFile;
-      	int errno = 0;
-      	while (( hFile = readdir( dirFile )) != NULL ) 
+      	while (( hFile = readdir( dirFile )) != NULL )
       	{
          	if ( !strcmp( hFile->d_name, "."  )) continue;
          	if ( !strcmp( hFile->d_name, ".." )) continue;
 
          	// in linux hidden files all start with '.'
-         	if ( gIgnoreHidden && ( hFile->d_name[0] == '.' )) continue;
+         	if ( hFile->d_name[0] == '.' ) continue;
 
-         	// dirFile.name is the name of the file. Do whatever string comparison 
+         	// dirFile.name is the name of the file. Do whatever string comparison
          	// you want here. Something like:
-         	if ( strstr( hFile->d_name, ".png" )){
-            	printf( "found an .png file: %s", hFile->d_name );
-            	cv::Mat im = cv::imread(path + hFile->d_name + ".png");
+         	if ( strstr( hFile->d_name, ".bmp" )){
+							char imname [2048];
+							sprintf (imname, "%s%s", path, hFile->d_name);
+							cout << "found an .bmp file: " << imname << endl;
+            	cv::Mat im = cv::imread(imname, 0);
             	imgs.push_back(im);
+
+							cv::imshow("Name", im);
+							cv::waitKey(250);
          	}
 
-      	} 
+      	}
     	closedir( dirFile );
-    	cout << "Read " << imgs.size() << " png images" << endl;
+    	cout << "Read " << imgs.size() << " bmp images" << endl;
     	return 0;
    	}
    	return -1;
 }
 
-int SetupCameras (std::vector<Camera> &cams, int nCam)
+int SetupCameras (Camera **cams, uint nCam, std::vector<ExtendedShutterType> shutterTypes)
 {
+	// cams = new Camera* [nCam];
 	PrintBuildInfo();
-
-	// const int k_numImages = 5;
 
 	Error error;
 
@@ -131,7 +139,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 		return -1;
 	}
 
-	for (int i = 0; i < nCam; i++){
+	for (uint i = 0; i < nCam; i++){
 
 		cout << "Connecting " << i << "th camera" << endl;
 
@@ -143,10 +151,10 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 			return -1;
 		}
 
-		Camera cam;
+		cams[i] = new Camera();
 
 		// Connect to a camera
-		error = cam.Connect(&guid);
+		error = cams[i]->Connect(&guid);
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
@@ -155,7 +163,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 
 		// Get the camera information
 		CameraInfo camInfo;
-		error = cam.GetCameraInfo(&camInfo);
+		error = cams[i]->GetCameraInfo(&camInfo);
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
@@ -167,7 +175,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 		// Check if the camera supports the FRAME_RATE property
 		PropertyInfo propInfo;
 		propInfo.type = FRAME_RATE;
-		error = cam.GetPropertyInfo( &propInfo );
+		error = cams[i]->GetPropertyInfo( &propInfo );
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
@@ -182,7 +190,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 
 			Property prop;
 			prop.type = FRAME_RATE;
-			error = cam.GetProperty( &prop );
+			error = cams[i]->GetProperty( &prop );
 			if (error != PGRERROR_OK)
 			{
 				PrintError( error );
@@ -192,7 +200,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 			prop.autoManualMode = false;
 			prop.onOff = false;
 
-			error = cam.SetProperty( &prop );
+			error = cams[i]->SetProperty( &prop );
 			if (error != PGRERROR_OK)
 			{
 				PrintError( error );
@@ -210,7 +218,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 			const unsigned int k_extendedShutter = 0x1028;
 			unsigned int extendedShutterRegVal = 0;
 
-			error = cam.ReadRegister( k_extendedShutter, &extendedShutterRegVal );
+			error = cams[i]->ReadRegister( k_extendedShutter, &extendedShutterRegVal );
 			if (error != PGRERROR_OK)
 			{
 				PrintError( error );
@@ -221,7 +229,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 			if ( extendedShutterBS[31] == true )
 			{
 				// Set the camera into extended shutter mode
-				error = cam.WriteRegister( k_extendedShutter, 0x80020000 );
+				error = cams[i]->WriteRegister( k_extendedShutter, 0x80020000 );
 				if (error != PGRERROR_OK)
 				{
 					PrintError( error );
@@ -240,7 +248,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 		// Set the shutter property of the camera
 		Property prop;
 		prop.type = SHUTTER;
-		error = cam.GetProperty( &prop );
+		error = cams[i]->GetProperty( &prop );
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
@@ -250,10 +258,10 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 		prop.autoManualMode = false;
 		prop.absControl = true;
 
-		const float k_shutterVal = 3000.0;
+		const float k_shutterVal = 500.0;
 		prop.absValue = k_shutterVal;
 
-		error = cam.SetProperty( &prop );
+		error = cams[i]->SetProperty( &prop );
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
@@ -265,7 +273,7 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 		// Enable timestamping
 		EmbeddedImageInfo embeddedInfo;
 
-		error = cam.GetEmbeddedImageInfo( &embeddedInfo );
+		error = cams[i]->GetEmbeddedImageInfo( &embeddedInfo );
 		if ( error != PGRERROR_OK )
 		{
 			PrintError( error );
@@ -277,37 +285,43 @@ int SetupCameras (std::vector<Camera> &cams, int nCam)
 			embeddedInfo.timestamp.onOff = true;
 		}
 
-		error = cam.SetEmbeddedImageInfo( &embeddedInfo );
+		error = cams[i]->SetEmbeddedImageInfo( &embeddedInfo );
 		if ( error != PGRERROR_OK )
 		{
 			PrintError( error );
 			return -1;
 		}
 
-		cams[i] = cam;
+		shutterTypes.push_back(shutterType);
 	}
-}
 
-int PutAwayCameras(std::vector<Camera> &cams){
-	int error;
-	int cnt = 0;
-
-	for (Camera cam : cams){
-		cout << "Putting away " << cnt++ << "th camera..." << endl;
-
-		// Stop capturing images
-		error = cam.StopCapture();
-		if (error != PGRERROR_OK)
+	for (uint i = 0; i < nCam; i++){
+		CameraInfo camInfo;
+		Error err;
+		err = cams[i]->GetCameraInfo(&camInfo);
+		if (err != PGRERROR_OK)
 		{
-			PrintError( error );
+			PrintError( err );
 			return -1;
 		}
+    cout << "again " << i << endl;
+		PrintCameraInfo(&camInfo);
+
+	}
+	return 0;
+}
+
+int PutAwayCameras(Camera **cams, uint nCams, std::vector<ExtendedShutterType> &shutterTypes){
+	Error error;
+
+	for (uint i = 0; i < nCams; i++){
+		cout << "Putting away " << i << "th camera..." << endl;
 
 		// Set the camera back to its original state
 		Property prop;
-		
+
 		prop.type = SHUTTER;
-		error = cam.GetProperty( &prop );
+		error = cams[i]->GetProperty( &prop );
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
@@ -316,18 +330,19 @@ int PutAwayCameras(std::vector<Camera> &cams){
 
 		prop.autoManualMode = true;
 
-		error = cam.SetProperty( &prop );
+		error = cams[i]->SetProperty( &prop );
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
 			return -1;
 		}
 
+		ExtendedShutterType shutterType = shutterTypes[i];
 		if ( shutterType == GENERAL_EXTENDED_SHUTTER )
 		{
 			Property prop;
 			prop.type = FRAME_RATE;
-			error = cam.GetProperty( &prop );
+			error = cams[i]->GetProperty( &prop );
 			if (error != PGRERROR_OK)
 			{
 				PrintError( error );
@@ -337,7 +352,7 @@ int PutAwayCameras(std::vector<Camera> &cams){
 			prop.autoManualMode = true;
 			prop.onOff = true;
 
-			error = cam.SetProperty( &prop );
+			error = cams[i]->SetProperty( &prop );
 			if (error != PGRERROR_OK)
 			{
 				PrintError( error );
@@ -350,7 +365,7 @@ int PutAwayCameras(std::vector<Camera> &cams){
 			const unsigned int k_extendedShutter = 0x1028;
 			unsigned int extendedShutterRegVal = 0;
 
-			error = cam.ReadRegister( k_extendedShutter, &extendedShutterRegVal );
+			error = cams[i]->ReadRegister( k_extendedShutter, &extendedShutterRegVal );
 			if (error != PGRERROR_OK)
 			{
 				PrintError( error );
@@ -361,7 +376,7 @@ int PutAwayCameras(std::vector<Camera> &cams){
 			if ( extendedShutterBS[31] == true )
 			{
 				// Set the camera into extended shutter mode
-				error = cam.WriteRegister( k_extendedShutter, 0x80000000 );
+				error = cams[i]->WriteRegister( k_extendedShutter, 0x80000000 );
 				if (error != PGRERROR_OK)
 				{
 					PrintError( error );
@@ -371,7 +386,7 @@ int PutAwayCameras(std::vector<Camera> &cams){
 		}
 
 		// Disconnect the camera
-		error = cam.Disconnect();
+		error = cams[i]->Disconnect();
 		if (error != PGRERROR_OK)
 		{
 			PrintError( error );
@@ -393,66 +408,87 @@ int main(int argc, char** argv)
 	int error;
 
 	vector<cv::Mat> imgs;
-	error = readImages(argv[2], imgs);
+	error = readImages(argv[1], imgs);
 	if (error != 0){
-		cout << "Failed to read in images. Quitting..."
+		cout << "Failed to read in images. Quitting..." << endl;
 		return -1;
 	}
 
 	// Setup camera
-	int nCams = 2;
-	vector<Camera> cams;
-	error = SetupCameras(cams, nCams);
+	uint nCams = 2;
+	Camera ** cams = new Camera* [nCams];
+	vector<ExtendedShutterType> shutterTypes;
+	error = SetupCameras(cams, nCams, shutterTypes);
 	if (error != 0){
-		cout << "Failed to setup " << nCams << " cameras. Quitting..."
+		cout << "Failed to setup " << nCams << " cameras. Quitting..." << endl;
 		return -1;
 	}
 
 	// Display image and capture on all cameras
 	for (cv::Mat im : imgs) {
-		cvNamedWindow("SCalib", CV_WINDOW_NORMAL);
+			cvNamedWindow("SCalib", CV_WINDOW_NORMAL);
     	cvSetWindowProperty("SCalib", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
-    	cvShowImage("SCalib", im);
+    	// cvShowImage("SCalib", &im);
+			cv::imshow("SCalib", im);
 
     	cv::waitKey(1000);
 
-    	for (int i = 0; i < cams.size(); i++) {
+    	for (uint i = 0; i < nCams; i++) {
 
-    		Camera cam = cams[i];
-    		int errror;
+	    		// Camera *cam = cams[i];
+	    		Error err;
+					// cout << cams[i] << endl;
 
-			// Start the camera
-			error = cam.StartCapture();
-			if (error != PGRERROR_OK)
-			{
-				PrintError( error );
-				continue;
+					// CameraInfo camInfo;
+					// err = cams[i]->GetCameraInfo(&camInfo);
+					// if (err != PGRERROR_OK)
+					// {
+					// 	PrintError( err );
+					// 	return -1;
+					// }
+					// cout << "again again" << i << endl;
+					// PrintCameraInfo(&camInfo);
+
+					// Start the camera
+					err = cams[i]->StartCapture();
+					if (err != PGRERROR_OK)
+					{
+						PrintError( err );
+						continue;
+					}
+
+					Image image;
+					err = cams[i]->RetrieveBuffer( &image );
+					if (err != PGRERROR_OK)
+					{
+						PrintError( err );
+						continue;
+					}
+
+					TimeStamp timestamp = image.GetTimeStamp();
+					cout << "TimeStamp [" << timestamp.cycleSeconds << " " << timestamp.cycleCount << "]" << endl;
+
+					// Stop capturing images
+					err = cams[i]->StopCapture();
+					if (err != PGRERROR_OK)
+					{
+						PrintError( err );
+						return -1;
+					}
+
+					Image rgbImage;
+					image.Convert( FlyCapture2::PIXEL_FORMAT_BGR, &rgbImage );
+					unsigned int rowBytes = (double)rgbImage.GetReceivedDataSize()/(double)rgbImage.GetRows();
+					cv::Mat cvImage = cv::Mat(rgbImage.GetRows(), rgbImage.GetCols(), CV_8UC3, rgbImage.GetData(), rowBytes);
+					string imgname = "cam" + to_string(i) + "at" + std::to_string(timestamp.cycleSeconds) + "_" + std::to_string(timestamp.cycleCount) + ".bmp";
+					cv::imwrite(imgname, cvImage);
+
 			}
-
-			Image image;
-			error = cam.RetrieveBuffer( &image );
-			if (error != PGRERROR_OK)
-			{
-				PrintError( error );
-				continue;
-			}
-
-			TimeStamp timestamp = image.GetTimeStamp();
-			cout << "TimeStamp [" << timestamp.cycleSeconds << " " << timestamp.cycleCount << "]" << endl;
-
-			Image rgbImage;
-			image.Convert( FlyCapture2::PIXEL_FORMAT_BGR, &rgbImage );
-			unsigned int rowBytes = (double)rgbImage.GetReceivedDataSize()/(double)rgbImage.GetRows();
-			cv::Mat cvImage = cv::Mat(rgbImage.GetRows(), rgbImage.GetCols(), CV_8UC3, rgbImage.GetData(), rowBytes);
-			string imgname = "cam" + to_string(i) + "at" + std::to_string(timestamp.cycleSeconds) + "_" + std::to_string(timestamp.cycleCount) + ".png";
-			cv::imwrite(imgname, cvImage);
-
 			cv::waitKey(1000);
-		}
-    }
-	
+  }
+
 	// Put away cameras
-	error = PutAwayCameras(cams);
+	error = PutAwayCameras(cams, nCams, shutterTypes);
 	if (error != 0){
 		cout << "Failed to put away cameras! Quitting ..." << endl;
 		return -1;
