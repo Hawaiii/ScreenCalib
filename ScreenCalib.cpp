@@ -78,9 +78,10 @@ void PrintError( Error error )
 	error.PrintErrorTrace();
 }
 
-int readImages(const char *path, std::vector<cv::Mat> &imgs)
+int readImages(const char *path, std::vector<cv::Mat> &imgs, std::vector<std::string> &img_names)
 {
 	imgs.clear();
+	img_names.clear();
 
 	DIR* dirFile = opendir( path );
    	if ( dirFile )
@@ -100,8 +101,10 @@ int readImages(const char *path, std::vector<cv::Mat> &imgs)
 							char imname [2048];
 							sprintf (imname, "%s%s", path, hFile->d_name);
 							cout << "found an .bmp file: " << imname << endl;
+
             	cv::Mat im = cv::imread(imname, 0);
-            	imgs.push_back(im);
+							img_names.push_back(hFile->d_name);
+							imgs.push_back(im);
 
 							cv::imshow("Name", im);
 							cv::waitKey(250);
@@ -258,7 +261,7 @@ int SetupCameras (Camera **cams, uint nCam, std::vector<ExtendedShutterType> shu
 		prop.autoManualMode = false;
 		prop.absControl = true;
 
-		const float k_shutterVal = 500.0;
+		const float k_shutterVal = 20.0; //YI
 		prop.absValue = k_shutterVal;
 
 		error = cams[i]->SetProperty( &prop );
@@ -408,7 +411,8 @@ int main(int argc, char** argv)
 	int error;
 
 	vector<cv::Mat> imgs;
-	error = readImages(argv[1], imgs);
+	vector<string> img_names;
+	error = readImages(argv[1], imgs, img_names);
 	if (error != 0){
 		cout << "Failed to read in images. Quitting..." << endl;
 		return -1;
@@ -425,7 +429,9 @@ int main(int argc, char** argv)
 	}
 
 	// Display image and capture on all cameras
-	for (cv::Mat im : imgs) {
+	for (uint j = 0; j < imgs.size(); j++){
+
+			cv::Mat im = imgs[j];
 			cvNamedWindow("SCalib", CV_WINDOW_NORMAL);
     	cvSetWindowProperty("SCalib", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
     	// cvShowImage("SCalib", &im);
@@ -435,20 +441,7 @@ int main(int argc, char** argv)
 
     	for (uint i = 0; i < nCams; i++) {
 
-	    		// Camera *cam = cams[i];
 	    		Error err;
-					// cout << cams[i] << endl;
-
-					// CameraInfo camInfo;
-					// err = cams[i]->GetCameraInfo(&camInfo);
-					// if (err != PGRERROR_OK)
-					// {
-					// 	PrintError( err );
-					// 	return -1;
-					// }
-					// cout << "again again" << i << endl;
-					// PrintCameraInfo(&camInfo);
-
 					// Start the camera
 					err = cams[i]->StartCapture();
 					if (err != PGRERROR_OK)
@@ -480,7 +473,7 @@ int main(int argc, char** argv)
 					image.Convert( FlyCapture2::PIXEL_FORMAT_BGR, &rgbImage );
 					unsigned int rowBytes = (double)rgbImage.GetReceivedDataSize()/(double)rgbImage.GetRows();
 					cv::Mat cvImage = cv::Mat(rgbImage.GetRows(), rgbImage.GetCols(), CV_8UC3, rgbImage.GetData(), rowBytes);
-					string imgname = "cam" + to_string(i) + "at" + std::to_string(timestamp.cycleSeconds) + "_" + std::to_string(timestamp.cycleCount) + ".bmp";
+					string imgname = "out/" + to_string(i) + "_" + img_names[j];
 					cv::imwrite(imgname, cvImage);
 
 			}
